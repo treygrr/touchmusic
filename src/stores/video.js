@@ -30,7 +30,12 @@ export const useVideoData = defineStore("videoData", {
             });
             if (!this.selectedVideoDevice) {
               // if no device is selected push the first available device
-              this.setSelectedVideoDevice(this.availableVideoDevices[0]);
+              this.setSelectedVideoDevice(
+                // get last in array
+                this.availableVideoDevices[
+                  this.availableVideoDevices.length - 1
+                ]
+              );
             }
           })
           .catch(function (err) {
@@ -62,6 +67,8 @@ export const useVideoData = defineStore("videoData", {
       if (navigator.mediaDevices.getUserMedia) {
         const setStream = navigator.mediaDevices.getUserMedia({
           video: {
+            height: 1080,
+            width: 1920,
             deviceId: selection.value,
           },
         });
