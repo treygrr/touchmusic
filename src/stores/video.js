@@ -5,6 +5,7 @@ export const useVideoData = defineStore("videoData", {
     video: null,
     availableVideoDevices: [],
     selectedVideoDevice: null,
+    videoReady: false,
   }),
 
   actions: {
@@ -39,24 +40,38 @@ export const useVideoData = defineStore("videoData", {
       }
     },
 
-    setSelectedVideoDevice(value) {
+    async setSelectedVideoDevice(value) {
       this.selectedVideoDevice = value;
-      this.setCamStreamFromSelection(value);
+      try {
+        await this.setCamStreamFromSelection(value);
+      } catch (error) {
+        console.log(error);
+      }
+    },
+
+    stopTracks() {
+      this.video.srcObject?.getTracks().forEach((track) => {
+        track.stop();
+      });
+      this.video.srcObject = null;
+      this.videoReady = false;
     },
 
     async setCamStreamFromSelection(selection) {
+      this.stopTracks();
       if (navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices
-          .getUserMedia({
-            video: {
-              deviceId: selection.value,
-            },
-          })
-          .then((stream) => {
-            this.video.srcObject = stream;
-            console.log(stream.id);
-          })
-          .catch(function (error) {});
+        const setStream = navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: selection.value,
+          },
+        });
+        try {
+          this.video.srcObject = await setStream;
+          this.videoReady = true;
+          console.log();
+        } catch (err) {
+          console.log(err.name + ": " + err.message);
+        }
       }
     },
   },
