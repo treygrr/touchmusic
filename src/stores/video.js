@@ -67,8 +67,8 @@ export const useVideoData = defineStore("videoData", {
       if (navigator.mediaDevices.getUserMedia) {
         const setStream = navigator.mediaDevices.getUserMedia({
           video: {
-            height: 1080,
-            width: 1920,
+            height: 2160,
+            width: 3849,
             deviceId: selection.value,
           },
         });

@@ -15,8 +15,8 @@
         ref="video"
         @playing="playingStream = true"
         @emptied="playingStream = false"
-        width="1920"
-        height="1080"
+        width="3840"
+        height="2160"
       ></video>
     </div>
     <div
@@ -66,7 +66,7 @@ export default {
     const centerY = ref(0);
     const cursorState = ref("moving");
     const defaultParams = {
-      flipHorizontal: false,
+      flipHorizontal: true,
       outputStride: 16,
       imageScaleFactor: 1,
       maxNumBoxes: 2,
