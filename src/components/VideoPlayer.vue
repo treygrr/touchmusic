@@ -1,54 +1,22 @@
 <template>
-  <div style="position: relative">
-    <div
-      style="
-        overflow: hidden;
-        height: 0;
-        width: 0;
-        position: absolute;
-        top: 0;
-        left: 0;
-      "
-    >
-      <video
-        autoplay="true"
-        ref="video"
-        @playing="playingStream = true"
-        @emptied="playingStream = false"
-        width="3840"
-        height="2160"
-      ></video>
-    </div>
-    <div
-      ref="virtualCursor"
-      :style="
-        `
-        width: 10px;
-        height: 10px;
-        border: 1px solid red;
-        border-radius: 100%;
-        position: absolute;` +
-        `top: ${centerY}px;
-        left: ${centerX}px;
-        background-color: ${cursorState === 'moving' ? 'red' : 'blue'};`
-      "
-    ></div>
-    <canvas ref="canvas" style="user-select: none"></canvas>
-    <q-btn
-      style="position: absolute; right: 500px; top: 400px; z-index: 100"
-      @click="q.notify('Hello from the button')"
-    >
-      Some button my dude
-      <q-icon name="play"></q-icon>
-    </q-btn>
-  </div>
+  <video
+    autoplay="true"
+    ref="video"
+    @playing="playingStream = true"
+    @emptied="playingStream = false"
+  ></video>
+  <canvas ref="canvas"></canvas>
 </template>
 
 <script>
 import { onBeforeMount, onMounted, ref, watch } from "vue";
 import { useVideoData } from "stores/video";
-import * as handTrack from "handtrackjs";
 import { useQuasar } from "quasar";
+
+import * as tf from "@tensorflow/tfjs";
+import * as handpose from "@tensorflow-models/handpose";
+import { drawHand } from "../utilities";
+import * as fp from "fingerpose";
 
 export default {
   name: "VideoPlayer",
@@ -59,165 +27,110 @@ export default {
     const q = useQuasar();
     const canvas = ref(null);
     let context = null;
-    let model = null;
     const playingStream = ref(false);
-    const virtualCursor = ref(null);
-    const centerX = ref(0);
-    const centerY = ref(0);
-    const cursorState = ref("moving");
-    const defaultParams = {
-      flipHorizontal: true,
-      outputStride: 16,
-      imageScaleFactor: 1,
-      maxNumBoxes: 2,
-      iouThreshold: 0.2,
-      scoreThreshold: 0.6,
-      modelType: "ssd640fpnlite",
-      modelSize: "small",
-      bboxLineWidth: "2",
-      fontSize: 17,
-    };
 
     onBeforeMount(async () => {});
 
     onMounted(async () => {
-      context = canvas.value.getContext("2d");
       videoData.setVideo(video);
       videoData.setAvailableVideoDevices();
-      startVideo();
     });
+
+    const videoStartLogic = async () => {
+      const net = await handpose.load();
+      console.log("Handpose model loaded.");
+      //  Loop and detect hands
+      setInterval(() => {
+        detect(net);
+      }, 10);
+    };
+
+    const detect = async (net) => {
+      // Check data is available
+      if (
+        typeof video.value !== "undefined" &&
+        video.value !== null &&
+        video.value.readyState === 4
+      ) {
+        // Get Video Properties
+        const videoFeed = video.value;
+        const videoWidth = video.value.getBoundingClientRect().width;
+        const videoHeight = video.value.getBoundingClientRect().height;
+
+        // Set video width
+        video.value.width = videoWidth;
+        video.value.height = videoHeight;
+
+        // Set canvas height and width
+        canvas.value.width = videoWidth;
+        canvas.value.height = videoHeight;
+
+        // Make Detections
+        const hand = await net.estimateHands(videoFeed);
+        // console.log(hand);
+
+        ///////// NEW STUFF ADDED GESTURE HANDLING
+
+        if (hand.length > 0) {
+          const GE = new fp.GestureEstimator([
+            fp.Gestures.VictoryGesture,
+            fp.Gestures.ThumbsUpGesture,
+          ]);
+          const gesture = await GE.estimate(hand[0].landmarks, 4);
+          if (gesture.gestures !== undefined && gesture.gestures.length > 0) {
+            // console.log(gesture.gestures);
+
+            const confidence = gesture.gestures.map(
+              (prediction) => prediction.score
+            );
+            const maxConfidence = confidence.indexOf(
+              Math.max.apply(null, confidence)
+            );
+            console.log(gesture.gestures[maxConfidence].name);
+            // console.log(gesture);
+          }
+        }
+        ///////// NEW STUFF ADDED GESTURE HANDLING
+
+        // Draw mesh
+        context = canvas.value.getContext("2d");
+        drawHand(
+          hand,
+          context,
+          video.value.videoWidth,
+          video.value.videoHeight
+        );
+      }
+    };
 
     watch(
       () => playingStream.value,
-      async (boolean) => {
-        if (model) {
-          model.dispose();
-        }
-        model = await handTrack.load(defaultParams);
-        console.log("Playing stream called", boolean);
-        if (boolean) {
-          startVideo();
+      async (newValue, oldValue) => {
+        if (newValue === true) {
+          videoStartLogic();
         }
       }
     );
 
-    const runDetection = () => {
-      if (!playingStream.value) {
-        console.log("Stream is not playing so we stop here.");
-        return;
-      }
-      model
-        .detect(video.value)
-        .then((predictions) => {
-          model.renderPredictions(
-            predictions,
-            canvas.value,
-            context,
-            video.value
-          );
-          checkForCommands(predictions);
-          // console.log(video.value.width, video.value.height);
-          requestAnimationFrame(runDetection);
-        })
-        .catch((err) => {
-          console.log("Error in runDetection", err);
-        });
-    };
-
-    const checkForCommands = (predictions) => {
-      const hasCommands = predictions.some((prediction) => {
-        return prediction.label === "open" || prediction.label === "closed";
-      });
-
-      const closedPredictions = predictions.filter((prediction) => {
-        return prediction.label === "closed";
-      })[0];
-
-      // we only care about first result of open
-      if (closedPredictions) {
-        cursorState.value = "closed";
-        // convert bounding box to coordinates to x y width height
-        const x = closedPredictions.bbox[0];
-        const y = closedPredictions.bbox[1];
-        const width = closedPredictions.bbox[2];
-        const height = closedPredictions.bbox[3];
-        // get center of bounding box
-        centerX.value = x + width / 2;
-        centerY.value = y + height / 2;
-        debounce(virtualClick(), 1000);
-        return;
-      }
-
-      // get predictions that are open
-      const openPredictions = predictions.filter((prediction) => {
-        return prediction.label === "open";
-      })[0];
-
-      if (openPredictions) {
-        cursorState.value = "moving";
-        // convert bounding box to coordinates to x y width height
-        const x = openPredictions.bbox[0];
-        const y = openPredictions.bbox[1];
-        const width = openPredictions.bbox[2];
-        const height = openPredictions.bbox[3];
-        // get center of bounding box
-        centerX.value = x + width / 2;
-        centerY.value = y + height / 2;
-        virtualMove();
-      }
-    };
-
-    const virtualClick = () => {
-      // click but debounce to 1000 ms then
-      // send a click event the to the element the virtualCursor is on
-      const target = document.elementFromPoint(centerX.value, centerY.value);
-
-      target.click();
-      console.log("clicked", target);
-    };
-
-    const virtualMove = () => {
-      // move the virtual cursor to the center of the bounding box
-      const target = document.elementFromPoint(centerX.value, centerY.value);
-      // send target hover event
-      target.dispatchEvent(new Event("mouseenter"));
-      console.log("moved");
-    };
-
-    const debounce = (func, wait, immediate) => {
-      let timeout;
-      return function () {
-        const context = this,
-          args = arguments;
-        const later = function () {
-          timeout = null;
-          if (!immediate) func.apply(context, args);
-        };
-        const callNow = immediate && !timeout;
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-        if (callNow) func.apply(context, args);
-      };
-    };
-
-    const startVideo = async () => {
-      runDetection();
-    };
-
     return {
       video,
       canvas,
-      virtualCursor,
       q,
-      defaultParams,
-      model,
       playingStream,
-      startVideo,
-      centerX,
-      cursorState,
-      centerY,
       videoData,
     };
   },
 };
 </script>
+
+<style lang="scss" scoped>
+video {
+  box-sizing: border-box;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  object-fit: contain;
+}
+</style>
